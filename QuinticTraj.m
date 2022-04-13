@@ -1,5 +1,6 @@
 % Generation of a cubic trajectory
 function a = QuinticTraj(tspan, x0, xf)
+
     to = tspan(1);
     tf = tspan(2);
     
