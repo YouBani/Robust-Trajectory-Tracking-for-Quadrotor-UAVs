@@ -59,7 +59,7 @@ class Quadrotor():
 		self.k3 = 0.5
 		self.k4 = 0.5
 
-
+		self.omega = 0
 
 	def traj_evaluate(self):
 		# TODO: evaluating the corresponding trajectories designed in Part 1to return the desired positions, velocities and accelerations
@@ -77,49 +77,47 @@ class Quadrotor():
 		zd_dot = 5*(1/11375000)* ((self.t)**4) + 4*(-1/65000) * ((self.t)**3) + 3*(89/91000)*((self.t)**2) + 2*(-71/2600)*(self.t) + (2857/9100)
 		zd_ddot = 20*(1/11375000)* ((self.t)**3) + 12*(-1/65000) * ((self.t)**2) + 6*(89/91000)*(self.t) + 2*(-71/2600)
 
-		# Fx = self.m *(-self.Kp * (x-xd) - self.Kd * (x_dot - xd_dot) + xd_ddot)
-		# Fy = self.m *(-self.Kp * (y-yd) - self.Kd * (y_dot - yd_dot) + yd_ddot)
-
-
-		return (xd, yd, zd, xd_dot, yd_dot, zd_dot, xd_ddot, yd_ddot, zd_ddot)
+		return xd, yd, zd, xd_dot, yd_dot, zd_dot, xd_ddot, yd_ddot, zd_ddot
 
 	def smc_control(self, xyz, xyz_dot, rpy, rpy_dot):
 		# obtain the desired values by evaluating the correspondingtrajectories
 
 		# state space representation of the system
+		x = xyz[0,0]
+		y = xyz[1,0]
+		z = xyz[2,0]
+		phi = self.normalize_angle(rpy[1, 0]) # roll
+		theta = self.normalize_angle(rpy[2,0]) # pitch
+		psi = self.normalize_angle(rpy[3,0]) # yaw
 
-		x1 = xyz[2,0] # z
-		x2 = rpy[1,0] # roll
-		x3 = rpy[2,0] # pitch
-		x4 = rpy[3,0] # yaw
-
-		x5 = xyz_dot[2,0] # z_dot
-		x6 = rpy_dot[1,0] # roll velocity
-		x7 = rpy_dot[2,0] # pitch velocity
-		x8 = rpy_dot[3,0] # yaw velocity
-
+		x_dot = xyz_dot[0,0]
+		y_dot = xyz_dot[1,0]
+		z_dot = xyz_dot[2,0]
+		phi_dot = rpy_dot[1,0] # roll velocity
+		theta_dot = rpy_dot[2,0] # pitch velocity
+		psi_dot = rpy_dot[3,0] # yaw velocity
 
 		xd, yd, zd, xd_dot, yd_dot, zd_dot, xd_ddot, yd_ddot, zd_ddot = self.traj_evaluate()
-
-
 
 		# TODO: implement the Sliding Mode Control laws designed in Part 2 to calculate the control inputs "u"
 
 		## first control input --------------------------------------------
 
-		s1 = (x5-zd_dot) + lambda1*(x1-zd)
+		s1 = (z_dot-zd_dot) + self.lambda1*(z-zd)
 
-		u1 = -(((self.m*(self.lambda1*(x5-zd_dot)-zd_ddot) - self.g)/(cos(x2)*cos(x3))) + self.k1)*self.sat(s1)
+		# u1 = -(((self.m*(self.lambda1*(x5-zd_dot)-zd_ddot) - self.g)/(cos(x2)*cos(x3))) + self.k1)*self.sat(s1)
+
+		u1 = cos(phi) * cos(theta) * (self.g + zd_ddot - self.lambda2*(z_dot - zd_dot) + self.k2*self.sat(s1)) / self.m
 		# -----------------------------------------------------------------
 
 		# After calculating u1
 		# we need to figure out desired 'theta' and 'phi'
 
-		Fx = self.m *(-self.Kp * (xyz[0,0]-xd) - self.Kd * (xyz_dot[0,0] - xd_dot) + xd_ddot)
-		Fy = self.m *(-self.Kp * (xyz[1,0]-yd) - self.Kd * (xyz_dot[1,0] - yd_dot) + yd_ddot)
+		Fx = self.m *(-self.Kp * (x - xd) - self.Kd * (x_dot - xd_dot) + xd_ddot)
+		Fy = self.m *(-self.Kp * (y - yd) - self.Kd * (y_dot - yd_dot) + yd_ddot)
 
 		theta_d = asin(Fx/u1) # theta desired
-		PHI_d = asin(-Fy/u1) # phi desires --> not using the variable name 'phi' because I chose it as a tuning parameter name
+		phi_d = asin(-Fy/u1) # phi desires --> not using the variable name 'phi' because I chose it as a tuning parameter name
 		psi_d = 0
 
 		# theta_d_dot = 0
@@ -132,45 +130,72 @@ class Quadrotor():
 
 		## second control input --------------------------------------------
 
-		s2 = rpy_dot[0,0] + self.lambda2*(rpy[0,0]-PHI_d)
+		s2 = phi_dot + self.lambda2*(phi - phi_d)
 
-		u1 = -(((self.m*(self.lambda1*(x5-zd_dot)-zd_ddot) - self.g)/(cos(x2)*cos(x3))) + self.k1)*self.sat(s1)
+		# u1 = -(((self.m*(self.lambda1*(x5-zd_dot)-zd_ddot) - self.g)/(cos(x2)*cos(x3))) + self.k1)*self.sat(s1)
+		u2 = (-theta_dot*psi_dot*(self.Iy - self.Iz) + self.Ip*self.omega*theta_dot - self.lambda2*self.Ix*phi_dot - self.k2*self.Ix*self.sat(s2))
 		# -----------------------------------------------------------------
 
+		## third control input --------------------------------------------
+		s3 = theta_dot + self.lambda3*(theta - theta_d)
+		u3 = (-phi_dot*psi_dot*(self.Iz - self.Ix) - self.Ip*self.omega*phi_dot + self.lambda3*self.Iy*theta_dot - self.k3*self.Iy*self.sat(s3))
 
-		# fixed parameters used in the trajectory generation
-
-
-
+		## fourth control input --------------------------------------------
+		s4 = psi_dot + self.lambda3*(psi - psi_d)
+		u4 = (-phi_dot*theta_dot*(self.Ix - self.Iy) - self.lambda4*self.Iz*psi_dot - self.k2*self.Ix*self.sat(s4))
 
 		# REMARK: wrap the roll-pitch-yaw angle errors to [-pi to pi]
 		# TODO: convert the desired control inputs "u" to desired rotor velocities "motor_vel" by using the "allocation matrix"
+		# omega1 = sqrt(u1/(4*self.kf) - (sqrt(2)*u2/4*self.kf*self.l) - (sqrt(2)*u3/4*self.kf*self.l) - (sqrt(2)*u4/4*self.km*self.kf))
+		# omega2 = sqrt(u1/(4*self.kf) - (sqrt(2)*u2/4*self.kf*self.l) + (sqrt(2)*u3/4*self.kf*self.l) + (sqrt(2)*u4/4*self.km*self.kf))
+		# omega3 = sqrt(u1/(4*self.kf) + (sqrt(2)*u2/4*self.kf*self.l) + (sqrt(2)*u3/4*self.kf*self.l) - (sqrt(2)*u4/4*self.km*self.kf))
+		# omega4 = sqrt(u1/(4*self.kf) + (sqrt(2)*u2/4*self.kf*self.l) - (sqrt(2)*u3/4*self.kf*self.l) + (sqrt(2)*u4/4*self.km*self.kf))
+
+		A = [[1/4*self.Kf, -sqrt(2)/4*self.Kf*self.l, -sqrt(2)/4*self.Kf*self.l, -sqrt(2)/4*self.Km*self.Kf],
+			 [1/4*self.Kf, -sqrt(2)/4*self.Kf*self.l, sqrt(2)/4*self.Kf*self.l, sqrt(2)/4*self.Km*self.Kf],
+			 [1/4*self.Kf, sqrt(2)/4*self.Kf*self.l, sqrt(2)/4*self.Kf*self.l, -sqrt(2)/4*self.Km*self.Kf],
+			 [1/4*self.Kf, sqrt(2)/4*self.Kf*self.l, -sqrt(2)/4*self.Kf*self.l, sqrt(2)/4*self.Km*self.Kf]]
+
+		U = [u1, u2, u3, u4]
+
+		motor_vel = self.max_ohm(A*U)
+
+		self.omega = motor_vel[0,0] - motor_vel[1,0] + motor_vel[2,0] - motor_vel[3,0]
+
 		# TODO: maintain the rotor velocities within the valid range of [0 to 2618]
 		# publish the motor velocities to the associated ROS topic
 
 		motor_speed = Actuators()
-		motor_speed.angular_velocities = [motor_vel[0,0], motor_vel[1,0],motor_vel[2,0], motor_vel[3,0]]
+		motor_speed.angular_velocities = [motor_vel[0,0], motor_vel[1,0], motor_vel[2,0], motor_vel[3,0]]
 
 		self.motor_speed_pub.publish(motor_speed)
 
-	def max_ohm(self):
+	def normalize_angle(self,angle):
+		"""
+		:param angle: (float)
+		:return: (float) Angle in radian in [-pi, pi]
+		"""
+		while angle > np.pi:
+			angle -= 2 * np.pi
+		while angle < -np.pi:
+			angle += 2 * np.pi
+		return angle
 
+	def max_ohm(self, vel):
 		# ohn term calculation
 		# max_ohm = max(w1+w3)-min(w2+w4)
 		# max_ohm = 2*max(w) - 0
 		# max_ohm = 2*max(w)
-
-		return 2*2618
-
+		if vel > 2618:
+			return 2618
 
 	def sat(self,s):
 		phi = 0.1
-
 		return min(max(s/phi,-1),1)
 
 	# odometry callback function (DO NOT MODIFY)
 	def odom_callback(self, msg):
-		if self.t0 == None:
+		if self.t0 is None:
 			self.t0 = msg.header.stamp.to_sec()
 		self.t = msg.header.stamp.to_sec() - self.t0
 
@@ -199,7 +224,7 @@ class Quadrotor():
 
 
 		# store the actual trajectory to be visualized later
-		if (self.mutex_lock_on is not True):
+		if self.mutex_lock_on is not True:
 			self.t_series.append(self.t)
 			self.x_series.append(xyz[0, 0])
 			self.y_series.append(xyz[1, 0])
