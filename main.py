@@ -107,7 +107,7 @@ class Quadrotor():
 
 		# u1 = -(((self.m*(self.lambda1*(x5-zd_dot)-zd_ddot) - self.g)/(cos(x2)*cos(x3))) + self.k1)*self.sat(s1)
 
-		u1 = cos(phi) * cos(theta) * (self.g + zd_ddot - self.lambda2*(z_dot - zd_dot) + self.k2*self.sat(s1)) / self.m
+		u1 = cos(phi) * cos(theta) * (self.g + zd_ddot - self.lambda2*(z_dot - zd_dot) + self.k2*self.sgn(s1)) / self.m
 		# -----------------------------------------------------------------
 
 		# After calculating u1
@@ -133,16 +133,16 @@ class Quadrotor():
 		s2 = phi_dot + self.lambda2*(phi - phi_d)
 
 		# u1 = -(((self.m*(self.lambda1*(x5-zd_dot)-zd_ddot) - self.g)/(cos(x2)*cos(x3))) + self.k1)*self.sat(s1)
-		u2 = (-theta_dot*psi_dot*(self.Iy - self.Iz) + self.Ip*self.omega*theta_dot - self.lambda2*self.Ix*phi_dot - self.k2*self.Ix*self.sat(s2))
+		u2 = (-theta_dot*psi_dot*(self.Iy - self.Iz) + self.Ip*self.omega*theta_dot - self.lambda2*self.Ix*phi_dot - self.k2*self.Ix*self.sgn(s2))
 		# -----------------------------------------------------------------
 
 		## third control input --------------------------------------------
 		s3 = theta_dot + self.lambda3*(theta - theta_d)
-		u3 = (-phi_dot*psi_dot*(self.Iz - self.Ix) - self.Ip*self.omega*phi_dot + self.lambda3*self.Iy*theta_dot - self.k3*self.Iy*self.sat(s3))
+		u3 = (-phi_dot*psi_dot*(self.Iz - self.Ix) - self.Ip*self.omega*phi_dot + self.lambda3*self.Iy*theta_dot - self.k3*self.Iy*self.sgn(s3))
 
 		## fourth control input --------------------------------------------
 		s4 = psi_dot + self.lambda3*(psi - psi_d)
-		u4 = (-phi_dot*theta_dot*(self.Ix - self.Iy) - self.lambda4*self.Iz*psi_dot - self.k2*self.Ix*self.sat(s4))
+		u4 = (-phi_dot*theta_dot*(self.Ix - self.Iy) - self.lambda4*self.Iz*psi_dot - self.k2*self.Ix*self.sgn(s4))
 
 		# REMARK: wrap the roll-pitch-yaw angle errors to [-pi to pi]
 		# TODO: convert the desired control inputs "u" to desired rotor velocities "motor_vel" by using the "allocation matrix"
@@ -189,9 +189,11 @@ class Quadrotor():
 		if vel > 2618:
 			return 2618
 
-	def sat(self,s):
-		phi = 0.1
-		return min(max(s/phi,-1),1)
+	def sgn(self,s):
+		if s > 0:
+			return 1
+		if s < 0:
+			return -1
 
 	# odometry callback function (DO NOT MODIFY)
 	def odom_callback(self, msg):
@@ -222,7 +224,6 @@ class Quadrotor():
 
 		rpy = np.expand_dims(rpy, axis=1)
 
-
 		# store the actual trajectory to be visualized later
 		if self.mutex_lock_on is not True:
 			self.t_series.append(self.t)
@@ -232,8 +233,6 @@ class Quadrotor():
 
 		# call the controller with the current states
 		self.smc_control(xyz, xyz_dot, rpy, rpy_dot)
-
-
 
 	# save the actual trajectory data
 	def save_data(self):
